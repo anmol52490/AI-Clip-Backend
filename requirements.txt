@@ -1,0 +1,14 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+torchvision
+torchaudio
+fastapi
+uvicorn
+gunicorn
+python-multipart
+diffusers
+transformers
+accelerate
+opencv-python
+Pillow
+imageio[ffmpeg]
