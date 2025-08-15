@@ -1,16 +1,13 @@
 # .nixpacks/nixpacks.toml
-# This file provides configuration for Nixpacks, Railway's build system.
 
 [phases.setup]
-# This ensures that essential system libraries for handling images and video are installed.
-# We are adding "libgl" to fix the "libGL.so.1" error from OpenCV.
+# This line tells Railway to install the missing graphics library
 nixPkgs = ["...", "ffmpeg", "opencv", "libgl"]
 
 [phases.install]
-# Specifies the command to install our Python dependencies from requirements.txt
+# This tells Railway how to install your Python packages
 cmds = ["pip install -r requirements.txt"]
 
 [start]
-# This is the command to start our application.
-# It's the same one we configured in the Railway UI.
+# This tells Railway how to start your server
 cmd = "gunicorn app:app --workers 1 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 300"
