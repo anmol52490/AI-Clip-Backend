@@ -1,101 +1,109 @@
-# app.py
-# Final version, optimized for Vercel's serverless environment.
-
-import os
-import uuid
-import base64
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from contextlib import asynccontextmanager
+# app.py for Hugging Face Spaces
+import gradio as gr
 import torch
-from diffusers import AutoPipelineForText2Image
+from diffusers import StableDiffusionPipeline
 import numpy as np
 from PIL import Image
 import imageio
 import cv2
+import tempfile
+import os
 
-# --- Configuration for Vercel's Environment ---
-# Vercel provides a single writable directory: /tmp. We'll use it for everything.
-CACHE_DIR = "/tmp/huggingface_cache"
-GENERATED_DIR = "/tmp"
-os.makedirs(CACHE_DIR, exist_ok=True)
+# Load the smallest possible model
+model_id = "OFA-Sys/small-stable-diffusion-v0"
 
-# --- Global variable to hold the loaded AI model ---
-ml_models = {}
-
-# --- FastAPI Lifespan: Code to run on startup and shutdown ---
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """
-    This function runs once when the serverless function starts up.
-    It loads the AI model into memory from Vercel's temporary storage.
-    """
-    model_id = "segmind/tiny-sd"
-    print(f"Loading AI model ({model_id}) from cache: {CACHE_DIR}")
-    
-    try:
-        pipe = AutoPipelineForText2Image.from_pretrained(
-            model_id,
-            torch_dtype=torch.float32,
-            # variant="fp16",
-            cache_dir=CACHE_DIR # Tell diffusers to use the /tmp directory
-        )
-        pipe.to("cpu")
-        ml_models["text_to_image"] = pipe
-        print("✅ AI model loaded successfully.")
-    except Exception as e:
-        print(f"❌ Failed to load AI model: {e}")
-    
-    yield # The application runs after this point
-    
-    ml_models.clear()
-    print("AI model unloaded.")
-
-
-# --- Initialize the FastAPI App ---
-app = FastAPI(lifespan=lifespan)
-
-# Add CORS middleware to allow the frontend to communicate
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+print("Loading model...")
+pipe = StableDiffusionPipeline.from_pretrained(
+    model_id,
+    torch_dtype=torch.float16,
+    safety_checker=None,
+    requires_safety_checker=False
 )
 
-class VideoRequest(BaseModel):
-    prompt: str
+# Enable memory optimizations
+try:
+    pipe.enable_xformers_memory_efficient_attention()
+except:
+    pass
 
-def create_animated_video(base_image: Image.Image, output_path: str):
-    img_np = np.array(base_image)
-    height, width, _ = img_np.shape
-    num_frames = 5 * 24
-    with imageio.get_writer(output_path, mode='I', fps=24, codec='libx264') as writer:
+pipe.enable_vae_slicing()
+pipe.to("cpu")  # HF Spaces provides CPU by default
+
+def create_simple_video(image, duration=3):
+    """Create a simple zoom animation"""
+    img_np = np.array(image)
+    height, width = img_np.shape[:2]
+    fps = 24
+    num_frames = duration * fps
+    
+    # Create temporary video file
+    with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp_file:
+        video_path = tmp_file.name
+    
+    with imageio.get_writer(video_path, mode='I', fps=fps, codec='libx264') as writer:
         for i in range(num_frames):
+            # Simple zoom effect
             scale = 1.0 + (0.2 * i / num_frames)
             M = cv2.getRotationMatrix2D((width / 2, height / 2), 0, scale)
-            zoomed_frame_np = cv2.warpAffine(img_np, M, (width, height))
-            writer.append_data(zoomed_frame_np)
+            zoomed_frame = cv2.warpAffine(img_np, M, (width, height))
+            writer.append_data(zoomed_frame)
+    
+    return video_path
 
-@app.get("/")
-def read_root():
-    return {"message": "This is the root of the API. It's meant to be called by a frontend."}
-
-@app.post("/generate-video")
-async def generate_video_endpoint(request: VideoRequest):
-    if "text_to_image" not in ml_models:
-        raise HTTPException(status_code=503, detail="AI model is not available or is still loading.")
+def generate_video(prompt):
+    """Generate image and convert to video"""
     try:
-        pipe = ml_models["text_to_image"]
-        image = pipe(prompt=request.prompt, num_inference_steps=25, guidance_scale=7.5).images[0]
-        video_path = os.path.join(GENERATED_DIR, f"{uuid.uuid4()}.mp4")
-        create_animated_video(image, video_path)
-        with open(video_path, "rb") as video_file:
-            video_base64 = base64.b64encode(video_file.read()).decode('utf-8')
-        os.remove(video_path)
-        return {"video_base64": video_base64}
+        # Generate image
+        with torch.no_grad():
+            image = pipe(
+                prompt=prompt,
+                num_inference_steps=15,  # Very few steps for speed
+                guidance_scale=6.0,
+                height=512,
+                width=512
+            ).images[0]
+        
+        # Create video
+        video_path = create_simple_video(image, duration=3)
+        
+        return image, video_path
+        
     except Exception as e:
-        print(f"❌ Error during video generation: {str(e)}")
-        raise HTTPException(status_code=500, detail="An internal error occurred.")
+        return None, f"Error: {str(e)}"
+
+# Create Gradio interface
+with gr.Blocks(title="Free AI Video Generator") as demo:
+    gr.Markdown("# 🎬 Free AI Video Generator")
+    gr.Markdown("Generate images and simple animated videos from text prompts using AI!")
+    
+    with gr.Row():
+        with gr.Column():
+            prompt_input = gr.Textbox(
+                label="Enter your prompt",
+                placeholder="A beautiful sunset over mountains",
+                lines=3
+            )
+            generate_btn = gr.Button("Generate Video", variant="primary")
+        
+        with gr.Column():
+            image_output = gr.Image(label="Generated Image")
+            video_output = gr.Video(label="Generated Video")
+    
+    generate_btn.click(
+        generate_video,
+        inputs=[prompt_input],
+        outputs=[image_output, video_output]
+    )
+    
+    gr.Examples(
+        examples=[
+            ["A cute cat playing in a garden"],
+            ["A futuristic city skyline at night"],
+            ["A peaceful lake with mountains in background"],
+            ["A colorful flower bouquet"],
+        ],
+        inputs=[prompt_input]
+    )
+
+if __name__ == "__main__":
+    demo.launch()
