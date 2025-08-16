@@ -1,15 +1,9 @@
-
---extra-index-url https://download.pytorch.org/whl/cpu
-torch
-torchvision
-torchaudio
-fastapi
-uvicorn
-gunicorn
-python-multipart
-diffusers
-transformers
-accelerate
-opencv-python-headless
-Pillow
-imageio[ffmpeg]
+fastapi==0.104.1
+uvicorn==0.24.0
+requests==2.31.0
+pydantic==2.5.0
+pillow==10.1.0
+numpy==1.24.4
+opencv-python-headless==4.8.1.78
+imageio==2.31.5
+imageio[ffmpeg]==2.31.5
