@@ -10,6 +10,6 @@ python-multipart
 diffusers
 transformers
 accelerate
-opencv-python-headless # Use the headless version for server environments
+opencv-python-headless
 Pillow
 imageio[ffmpeg]
