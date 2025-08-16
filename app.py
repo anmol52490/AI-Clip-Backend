@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
         pipe = AutoPipelineForText2Image.from_pretrained(
             model_id,
             torch_dtype=torch.float32,
-            variant="fp16",
+            # variant="fp16",
             cache_dir=CACHE_DIR # Tell diffusers to use the /tmp directory
         )
         pipe.to("cpu")
