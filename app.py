@@ -1,11 +1,10 @@
 # app.py
-# Final version, with CORS middleware to allow the frontend to connect.
+# Final version, optimized for Vercel's serverless environment.
 
 import os
 import uuid
 import base64
 from fastapi import FastAPI, HTTPException
-# --- NEW: Import the CORS middleware ---
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
@@ -16,42 +15,54 @@ from PIL import Image
 import imageio
 import cv2
 
-# --- Configuration ---
-CACHE_DIR = "/data/huggingface_cache"
+# --- Configuration for Vercel's Environment ---
+# Vercel provides a single writable directory: /tmp. We'll use it for everything.
+CACHE_DIR = "/tmp/huggingface_cache"
 GENERATED_DIR = "/tmp"
 os.makedirs(CACHE_DIR, exist_ok=True)
 
+# --- Global variable to hold the loaded AI model ---
 ml_models = {}
 
+# --- FastAPI Lifespan: Code to run on startup and shutdown ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    This function runs once when the serverless function starts up.
+    It loads the AI model into memory from Vercel's temporary storage.
+    """
     model_id = "segmind/tiny-sd"
     print(f"Loading AI model ({model_id}) from cache: {CACHE_DIR}")
+    
     try:
         pipe = AutoPipelineForText2Image.from_pretrained(
             model_id,
             torch_dtype=torch.float32,
             variant="fp16",
-            cache_dir=CACHE_DIR
+            cache_dir=CACHE_DIR # Tell diffusers to use the /tmp directory
         )
         pipe.to("cpu")
         ml_models["text_to_image"] = pipe
         print("✅ AI model loaded successfully.")
     except Exception as e:
         print(f"❌ Failed to load AI model: {e}")
-    yield
+    
+    yield # The application runs after this point
+    
     ml_models.clear()
+    print("AI model unloaded.")
 
+
+# --- Initialize the FastAPI App ---
 app = FastAPI(lifespan=lifespan)
 
-# --- FIX: Add this entire block to enable CORS ---
-# This allows your Vercel frontend to make requests to this Railway backend.
+# Add CORS middleware to allow the frontend to communicate
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins (websites)
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods (GET, POST, etc.)
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 class VideoRequest(BaseModel):
@@ -70,12 +81,12 @@ def create_animated_video(base_image: Image.Image, output_path: str):
 
 @app.get("/")
 def read_root():
-    return {"message": "AI Video Generator API is running."}
+    return {"message": "This is the root of the API. It's meant to be called by a frontend."}
 
 @app.post("/generate-video")
 async def generate_video_endpoint(request: VideoRequest):
     if "text_to_image" not in ml_models:
-        raise HTTPException(status_code=503, detail="AI model is not available.")
+        raise HTTPException(status_code=503, detail="AI model is not available or is still loading.")
     try:
         pipe = ml_models["text_to_image"]
         image = pipe(prompt=request.prompt, num_inference_steps=25, guidance_scale=7.5).images[0]
